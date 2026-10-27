@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  jvm-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: .github/check-commit-emails.sh
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - run: >-
+          ./gradlew --no-daemon -Pskip.ios=true
+          :checkout:jvmTest :checkout:testDebugUnitTest
+          :checkout:compileReleaseKotlinAndroid :checkout-ui:compileReleaseKotlinAndroid
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew --no-daemon :checkout:compileKotlinIosArm64 :checkout-ui:compileKotlinIosArm64

@@ -1,0 +1,54 @@
+name: Release
+
+# A tag vX.Y.Z on a maintainer-signed commit publishes co.pesa:checkout and co.pesa:checkout-ui to
+# Maven Central through the Central Portal. The job runs on macOS so the iOS
+# klibs are published alongside the JVM and Android artifacts (Pesa's own KMP apps
+# consume them). Publishing uploads and validates; the deployment is
+# released by hand in the Central Portal (automaticRelease = false).
+#
+# Repository secrets:
+#   MAVEN_CENTRAL_USERNAME / MAVEN_CENTRAL_PASSWORD  Central Portal user token
+#   SIGNING_KEY         armored GPG private key (gpg --armor --export-secret-keys)
+#   SIGNING_KEY_ID      last 8 hex characters of the key id
+#   SIGNING_PASSWORD    the key's passphrase
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify the tagged commit is signed by a maintainer
+        run: .github/verify-tag.sh "${GITHUB_REF_NAME}"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Test
+        run: >-
+          ./gradlew --no-daemon "-Pversion=${GITHUB_REF_NAME#v}"
+          :checkout:jvmTest :checkout:testDebugUnitTest
+          :checkout:compileReleaseKotlinAndroid :checkout-ui:compileReleaseKotlinAndroid
+          :checkout:compileKotlinIosArm64 :checkout-ui:compileKotlinIosArm64
+      - name: Publish to Maven Central
+        run: ./gradlew --no-daemon --no-configuration-cache "-Pversion=${GITHUB_REF_NAME#v}" publishToMavenCentral
+        env:
+          ORG_GRADLE_PROJECT_mavenCentralUsername: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          ORG_GRADLE_PROJECT_mavenCentralPassword: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          ORG_GRADLE_PROJECT_signingInMemoryKey: ${{ secrets.SIGNING_KEY }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_KEY_ID }}
+          ORG_GRADLE_PROJECT_signingInMemoryKeyPassword: ${{ secrets.SIGNING_PASSWORD }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
