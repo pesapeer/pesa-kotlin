@@ -132,10 +132,9 @@ security@pesa.co. Do not open a public issue.
 
 1. Move the Unreleased notes in `CHANGELOG.md`. The version comes from the
    tag.
-2. Commit on `main` with an SSH key listed in `.github/allowed_signers`.
-   Then `git tag vX.Y.Z && git push origin vX.Y.Z`. Only repository admins
-   can push a `v*` tag.
-3. `release.yml` verifies that the tagged commit is signed by a maintainer, runs the tests, and publishes
+2. Tag with an SSH key listed in `.github/allowed_signers`:
+   `git tag -s vX.Y.Z -m "vX.Y.Z"`. Push the tag.
+3. `release.yml` verifies the tag signature, runs the tests, and publishes
    `co.pesa:checkout` and `co.pesa:checkout-ui` (JVM, Android and iOS
    klibs) to Maven Central through the Central Portal. A maintainer then
    releases the deployment by hand in the portal.

@@ -1,6 +1,6 @@
 name: Release
 
-# A tag vX.Y.Z on a maintainer-signed commit publishes co.pesa:checkout and co.pesa:checkout-ui to
+# A signed tag vX.Y.Z publishes co.pesa:checkout and co.pesa:checkout-ui to
 # Maven Central through the Central Portal. The job runs on macOS so the iOS
 # klibs are published alongside the JVM and Android artifacts (Pesa's own KMP apps
 # consume them). Publishing uploads and validates; the deployment is
@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Verify the tagged commit is signed by a maintainer
+      - name: Verify the tag signature
         run: .github/verify-tag.sh "${GITHUB_REF_NAME}"
       - uses: actions/setup-java@v4
         with:
