@@ -29,8 +29,8 @@ Maven Central:
 
 ```kotlin
 dependencies {
-    implementation("co.pesa:checkout:0.2.0")      // client
-    implementation("co.pesa:checkout-ui:0.2.0")   // Compose card form (optional)
+    implementation("co.pesa:checkout:0.3.0")      // client
+    implementation("co.pesa:checkout-ui:0.3.0")   // Compose card form (optional)
 }
 ```
 
@@ -89,13 +89,48 @@ The session tells the form what to show:
   `brand`, `last4`, `expiry` (MM/YYYY) and `holderName`. The list is empty
   when there are none.
 - `savedCardSecurityCode`: `REQUIRED`, `OPTIONAL` or `NEVER`. It tells
-  the form when to ask for the CVV again. An unknown value reads as
-  `OPTIONAL`.
+  the form when to ask for the CVV again. A missing or unknown value reads
+  as `NEVER`.
 
-Make the form state from the session. `PesaCardForm` then shows the saved
-cards first and selects the first one. "Use another card" shows the card
-fields. The CVV field follows `savedCardSecurityCode`. The switch shows
-only when `canSaveCard` is true.
+### The picker
+
+With saved cards, `PesaCardForm` is a payment sheet: one rounded list with
+hairlines between the rows.
+
+- One row per saved card: the brand on a small white chip, `•••• 0165` on
+  the first line and `Expires 09/28` under it, and a radio at the end. The
+  selected row has a filled radio and a semibold title.
+- An expired card stays in the list, greyed, and reads `Expired`. It
+  cannot be selected. The form selects the first card that has not
+  expired.
+- With `REQUIRED` or `OPTIONAL`, the selected row takes the CVV in a
+  narrow field at its end. With `NEVER` there is no CVV field.
+- "Use another card" is the last row. Selecting it opens the card fields
+  in the same list. "Save this card for next time" is their last line
+  while `canSaveCard` is true. Pass `showSaveCardSwitch = false` and place
+  `PesaSaveCardSwitch(formState)` yourself if your screen has its own spot
+  for it.
+- Colours come from your `MaterialTheme.colorScheme` (`surface`,
+  `outlineVariant`, `onSurfaceVariant`, `primary`, `error`), so a dark
+  colour scheme gives a dark sheet. The brand chip stays white so the
+  marks read on any surface.
+- Brand names from the gateway are read in any case, with or without
+  spaces, `_` or `-`. `mc`, `americanexpress`, `cup` and `chinaunionpay`
+  are understood (`CardBrand.parse`).
+
+Your pay button names the selected card.
+`formState.payLabel("1.00", "GBP")` gives "Pay £1.00 with •••• 0165" while
+a saved card is selected and "Pay £1.00" otherwise, in the form's
+language. `formState.payLabel(title)` adds the card to your own title. `formState.selectedSavedCard` has the card if you
+compose the label yourself.
+
+```kotlin
+Button(onClick = { pay() }, enabled = formState.complete(nowYear, nowMonth)) {
+    Text(formState.payLabel("1.00", "GBP"))
+}
+```
+
+### Paying
 
 ```kotlin
 val formState = PesaCardFormState(session)
@@ -133,9 +168,61 @@ Rules:
 - The 3-D Secure challenge and the result are the same as for a typed
   card.
 
+## Language
+
+The SDK ships four languages: `en`, `fr`, `fr-CA` and `zh-Hans`. All
+strings are in `commonMain`, so iOS and KMP hosts get them too. The SDK
+uses no Android resources.
+
+The SDK picks the language in this order:
+
+1. The `locale` that your app gives.
+2. The session's `locale`. The merchant sets it on the intent.
+3. The device language.
+4. English.
+
+Close tags are mapped: `fr-BE` gives `fr`, `zh` and `zh-Hant` give
+`zh-Hans`. An unknown tag such as `de` goes to the next step.
+
+```kotlin
+val checkout = PesaCheckout(PesaCheckoutConfig(pins = pins, locale = "fr"))   // error messages
+val formState = PesaCardFormState(session, locale = "fr")                     // the form
+PesaCardForm(state = formState, nowYear = y, nowMonth = m)
+
+Button(onClick = { pay() }) {
+    Text(formState.payLabel(session.amount, session.currency))   // "Payer 2,00 £GB"
+}
+```
+
+- Leave `locale` null to follow the session and then the device.
+- `PesaCardForm(locale = ...)` overrides the language of one form.
+- `LocalPesaStrings` gives the same strings to every Pesa composable
+  below it.
+- `PesaStrings.resolve(locale, session.locale)` gives the strings for your
+  own screens. `formatAmount`, `payLabel` and `errorMessage` fill them.
+- To change a sentence, copy a table:
+  `PesaStrings.fr.copy(saveCard = "...")`.
+- `CardValidation` uses English unless you pass `strings`.
+
+Money uses the platform formatter (`java.text.NumberFormat` on Android
+and the JVM, `NSNumberFormatter` on iOS) for the chosen language. The SDK
+does not change its output. Known output for £2.00:
+
+| Language | Output |
+|---|---|
+| `en`, `zh-Hans` | `£2.00` |
+| `fr-CA` | `2,00 £` |
+| `fr` | `2,00 £GB` |
+
+In `fr` and `fr-CA` the space before the symbol is a no-break space
+(U+00A0), not a narrow no-break space (U+202F). In `fr` the pound is
+`£GB`. This is the CLDR data in the platform.
+
 ## Error codes
 
-`PesaCheckoutException.code` is one of:
+`PesaCheckoutException.code` is one of the codes below. `message` is in
+the client's language and is safe to show. `gatewayMessage` is the
+gateway's English sentence for support. It can be empty.
 
 | Code | Meaning |
 |---|---|
@@ -208,7 +295,7 @@ Repository setup: secrets `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`,
 ```
 
 `./gradlew publishToMavenLocal -Pversion=X.Y.Z` publishes to `~/.m2` for a
-local consumer. Without `-Pversion` the build is `0.2.0-SNAPSHOT`.
+local consumer. Without `-Pversion` the build is `0.3.0-SNAPSHOT`.
 
 Properties: `-Pskip.android=true`, `-Pskip.ios=true`, `-Pskip.compose=true`
 drop a target or the UI module on a machine without its toolchain. iOS

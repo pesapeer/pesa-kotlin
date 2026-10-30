@@ -2,6 +2,7 @@ package co.pesa.checkout
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -87,5 +88,25 @@ class CardValidationTest {
         card.wipe()
         assertEquals("", card.digits())
         assertEquals("\u0000\u0000\u0000", card.code())
+    }
+
+    @Test
+    fun brandFromItsName() {
+        for (name in listOf("visa", "VISA", " Visa ")) assertEquals(CardBrand.VISA, CardBrand.parse(name), name)
+        for (name in listOf("mastercard", "MasterCard", "master_card", "master-card", "mc", "MC")) assertEquals(CardBrand.MASTERCARD, CardBrand.parse(name), name)
+        for (name in listOf("amex", "AMEX", "americanexpress", "American Express", "american_express")) assertEquals(CardBrand.AMEX, CardBrand.parse(name), name)
+        for (name in listOf("unionpay", "UnionPay", "union-pay", "cup", "CUP", "chinaunionpay", "China UnionPay")) assertEquals(CardBrand.UNIONPAY, CardBrand.parse(name), name)
+        for (name in listOf("", "diners", "card", "visa electron")) assertEquals(CardBrand.UNKNOWN, CardBrand.parse(name), name)
+    }
+
+    @Test
+    fun savedCardExpiry() {
+        val card = SavedCard(token = "t", brand = "visa", last4 = "0165", expiry = "09/2028")
+        assertEquals("09/28", card.shortExpiry)
+        assertTrue(card.isUsable(2028, 9), "usable through its expiry month")
+        assertFalse(card.isUsable(2028, 10))
+        assertFalse(card.isUsable(2029, 1))
+        assertEquals("soon", SavedCard(token = "t", expiry = "soon").shortExpiry)
+        assertTrue(SavedCard(token = "t", expiry = "soon").isUsable(2030, 1), "an unparsed expiry is left to the gateway")
     }
 }

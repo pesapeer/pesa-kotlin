@@ -61,6 +61,8 @@ Layout:
 | `checkout/src/commonMain/.../PesaCheckout.kt` | `PesaCheckout`, `PesaCheckoutConfig`: session, pay, poll, await. |
 | `checkout/src/commonMain/.../Model.kt` | Session, attempt, result, `IntentState`, `PesaCheckoutException`. |
 | `checkout/src/commonMain/.../Card.kt` | Card validation, `CardDetails`. |
+| `checkout/src/commonMain/.../PesaStrings.kt` | `PesaStrings`: language resolution, money format, error messages. |
+| `checkout/src/commonMain/.../strings_*.kt` | One table per language: `en`, `fr`, `frCA`, `zhHans`. |
 | `checkout/src/commonMain/.../ChallengeOpener.kt` | `expect` 3-D Secure opener. |
 | `checkout/src/{androidMain,iosMain,jvmMain}/` | Ktor engine with pinning; challenge opener per platform. |
 | `checkout-ui/src/commonMain/.../PesaCardForm.kt` | Compose form, `PesaCardFormState`, `PesaSecureScreen` expect. |
@@ -89,6 +91,8 @@ Rules for changes:
   import Android or iOS APIs.
 - Keep error codes in step with pesa-ios and pesa-flutter. The three
   SDKs share one error vocabulary.
+- Put every user-visible string in `PesaStrings` and in all four tables.
+  `PesaStringsTest` checks the keys and placeholders.
 - Add a line to `CHANGELOG.md` under "Unreleased" for every user-visible
   change.
 - Do not change the Maven coordinates or the POM in `build.gradle.kts`.

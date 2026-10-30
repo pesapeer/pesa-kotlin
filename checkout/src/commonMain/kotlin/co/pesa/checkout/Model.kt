@@ -57,7 +57,7 @@ data class Merchant(
     val supportUrl: String = "",
 )
 
-/** Whether the form asks the CVV again for a saved card. An unknown value reads as [OPTIONAL]. */
+/** Whether the form asks the CVV again for a saved card. A missing or unknown value reads as [NEVER]. */
 @Serializable
 enum class SavedCardSecurityCode {
     @SerialName("required") REQUIRED,
@@ -74,7 +74,19 @@ data class SavedCard(
     val expiry: String = "",
     val holderName: String = "",
 ) {
-    val cardBrand: CardBrand get() = CardBrand.entries.firstOrNull { it.wire == brand } ?: CardBrand.UNKNOWN
+    val cardBrand: CardBrand get() = CardBrand.parse(brand)
+
+    /** The expiry as MM/YY, or [expiry] as sent when it does not parse. */
+    val shortExpiry: String
+        get() = CardValidation.parseExpiry(expiry)
+            ?.let { (m, y) -> "${m.toString().padStart(2, '0')}/${(y % 100).toString().padStart(2, '0')}" }
+            ?: expiry
+
+    /** False once the expiry month has passed. A card whose expiry does not parse stays usable; the gateway decides. */
+    fun isUsable(nowYear: Int, nowMonth: Int): Boolean {
+        val (m, y) = CardValidation.parseExpiry(expiry) ?: return true
+        return y > nowYear || (y == nowYear && m >= nowMonth)
+    }
 
     override fun toString(): String = "SavedCard($brand •••• $last4, $expiry)"
 }
@@ -97,7 +109,9 @@ data class CheckoutSession(
     val expiresAt: String = "",
     val canSaveCard: Boolean = false,
     val savedCards: List<SavedCard> = emptyList(),
-    val savedCardSecurityCode: SavedCardSecurityCode = SavedCardSecurityCode.OPTIONAL,
+    val savedCardSecurityCode: SavedCardSecurityCode = SavedCardSecurityCode.NEVER,
+    /** The tenant's language for this checkout: `en`, `fr`, `fr-CA`, `zh-Hans`, or null. */
+    val locale: String? = null,
 ) {
     val acceptsCard: Boolean get() = state == IntentState.OPEN && "card" in methods && attempt?.state.let { it == null || it == AttemptState.DECLINED || it == AttemptState.FAILED }
 }
@@ -115,8 +129,17 @@ data class CheckoutResult(
     val succeeded: Boolean get() = state == IntentState.SETTLED || state == IntentState.AUTHORIZED
 }
 
-/** The errors the SDK raises. [code] is stable; [message] is safe to show. */
-class PesaCheckoutException(val code: Code, message: String, cause: Throwable? = null) : Exception(message, cause) {
+/**
+ * The errors the SDK raises. [code] is stable. [message] is safe to show and
+ * is in the client's language ([PesaStrings.errorMessage]). [gatewayMessage]
+ * is the gateway's English sentence, for support; it may be empty.
+ */
+class PesaCheckoutException(
+    val code: Code,
+    message: String,
+    cause: Throwable? = null,
+    val gatewayMessage: String = "",
+) : Exception(message, cause) {
     enum class Code {
         INVALID_CARD,
         INVALID_REQUEST,

@@ -28,6 +28,8 @@ import kotlinx.serialization.json.Json
  * @property pollInterval How long between reads while the acquirer works.
  * @property maxPolls How many reads before giving up with [PesaCheckoutException.Code.TIMEOUT].
  * @property challengePolls How many reads while a 3-D Secure challenge is open with the cardholder.
+ * @property locale The language of error messages, such as `fr`. Null follows
+ * the session's `locale`, then the device. See [PesaStrings.resolve].
  */
 data class PesaCheckoutConfig(
     val checkoutUrl: String = "https://checkout.pesa.co",
@@ -35,6 +37,7 @@ data class PesaCheckoutConfig(
     val pollInterval: Long = 1_500,
     val maxPolls: Int = 60,
     val challengePolls: Int = 200,
+    val locale: String? = null,
 )
 
 /**
@@ -60,7 +63,7 @@ class PesaCheckout internal constructor(
 
     /** Reads the checkout view of the intent: amount, methods, latest attempt. */
     suspend fun session(intentId: String, clientSecret: String): CheckoutSession {
-        val res = transport { http.get("$base/c/$intentId/session") { header("X-Client-Secret", clientSecret) } }
+        val res = transport(strings()) { http.get("$base/c/$intentId/session") { header("X-Client-Secret", clientSecret) } }
         return parse(res)
     }
 
@@ -86,9 +89,9 @@ class PesaCheckout internal constructor(
     ): CheckoutResult {
         try {
             val (y, m) = now()
-            val problems = CardValidation.validate(card, y, m)
+            val problems = CardValidation.validate(card, y, m, strings())
             if (problems.isNotEmpty()) throw PesaCheckoutException(PesaCheckoutException.Code.INVALID_CARD, problems.first().message)
-            val res = transport { http.post("$base/c/$intentId/card") {
+            val res = transport(strings()) { http.post("$base/c/$intentId/card") {
                 contentType(ContentType.Application.Json)
                 setBody(
                     CardChargeRequest(
@@ -122,9 +125,9 @@ class PesaCheckout internal constructor(
     ): CheckoutResult {
         try {
             val code = securityCode?.concatToString()?.ifEmpty { null }
-            val problem = code?.let { CardValidation.securityCode(it, CardBrand.UNKNOWN) }
+            val problem = code?.let { CardValidation.securityCode(it, CardBrand.UNKNOWN, strings()) }
             if (problem != null) throw PesaCheckoutException(PesaCheckoutException.Code.INVALID_CARD, problem.message)
-            val res = transport { http.post("$base/c/$intentId/card") {
+            val res = transport(strings()) { http.post("$base/c/$intentId/card") {
                 contentType(ContentType.Application.Json)
                 setBody(
                     SavedCardChargeRequest(
@@ -166,7 +169,9 @@ class PesaCheckout internal constructor(
                 }
             }
             val limit = if (challengeOpened) config.challengePolls else config.maxPolls
-            if (++polls > limit) throw PesaCheckoutException(PesaCheckoutException.Code.TIMEOUT, "The payment is taking longer than expected. Check its status before trying again.")
+            if (++polls > limit) {
+                throw PesaCheckoutException(PesaCheckoutException.Code.TIMEOUT, strings(s).errorMessage(PesaCheckoutException.Code.TIMEOUT))
+            }
             delay(config.pollInterval)
             s = try {
                 session(intentId, clientSecret)
@@ -179,7 +184,6 @@ class PesaCheckout internal constructor(
     private suspend inline fun <reified T> parse(res: HttpResponse): T {
         if (res.status.value in 200..299) return res.body()
         val body = runCatching { json.decodeFromString(ErrorBody.serializer(), res.bodyAsText()) }.getOrNull()?.error
-        val message = body?.message?.ifEmpty { null } ?: "The payment service answered ${res.status.value}."
         val code = when (res.status) {
             HttpStatusCode.BadRequest, HttpStatusCode.UnprocessableEntity ->
                 if (body?.field in CARD_FIELDS) PesaCheckoutException.Code.INVALID_CARD else PesaCheckoutException.Code.INVALID_REQUEST
@@ -189,8 +193,11 @@ class PesaCheckout internal constructor(
             HttpStatusCode.TooManyRequests -> PesaCheckoutException.Code.RATE_LIMITED
             else -> PesaCheckoutException.Code.SERVER
         }
-        throw PesaCheckoutException(code, message)
+        throw PesaCheckoutException(code, strings().errorMessage(code, body?.field.orEmpty()), gatewayMessage = body?.message.orEmpty())
     }
+
+    /** The client's language: [PesaCheckoutConfig.locale], then [session]'s, then the device. */
+    private fun strings(session: CheckoutSession? = null): PesaStrings = PesaStrings.resolve(config.locale, session?.locale)
 
     fun close() = http.close()
 
@@ -208,12 +215,12 @@ internal fun currentYearMonth(): Pair<Int, Int> {
 internal expect fun httpClientEngine(pins: List<String>): HttpClientEngine
 
 /** Wraps transport failures as [PesaCheckoutException.Code.NETWORK]. */
-internal suspend inline fun <T> transport(block: suspend () -> T): T = try {
+internal suspend inline fun <T> transport(strings: PesaStrings, block: suspend () -> T): T = try {
     block()
 } catch (e: CancellationException) {
     throw e
 } catch (e: PesaCheckoutException) {
     throw e
 } catch (e: Exception) {
-    throw PesaCheckoutException(PesaCheckoutException.Code.NETWORK, "Could not reach the payment service.", e)
+    throw PesaCheckoutException(PesaCheckoutException.Code.NETWORK, strings.errorNetwork, e)
 }

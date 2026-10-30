@@ -9,6 +9,15 @@ enum class CardBrand(val wire: String, val cvvLength: Int, val lengths: IntRange
     UNKNOWN("card", 3, 13..19);
 
     companion object {
+        /** Reads a brand as the gateway or an acquirer names it, in any case and with or without spaces, `_` or `-`. */
+        fun parse(name: String): CardBrand = when (name.lowercase().filterNot { it == ' ' || it == '_' || it == '-' }) {
+            "visa" -> VISA
+            "mastercard", "mc" -> MASTERCARD
+            "amex", "americanexpress" -> AMEX
+            "unionpay", "cup", "chinaunionpay" -> UNIONPAY
+            else -> UNKNOWN
+        }
+
         /** Detects the brand from the leading digits. Works on partial input. */
         fun detect(digits: CharSequence): CardBrand {
             val d = digits.filter { it.isDigit() }.toString()
@@ -61,7 +70,7 @@ class CardDetails(
     override fun toString(): String = "CardDetails(${brand.wire} •••• $last4)"
 }
 
-/** A validation problem, named by the field it belongs to. */
+/** A validation problem, named by the field it belongs to. [message] is in the [PesaStrings] passed to [CardValidation]. */
 data class CardFieldError(val field: CardField, val message: String)
 
 enum class CardField { NUMBER, EXPIRY, SECURITY_CODE, HOLDER_NAME, EMAIL }
@@ -83,12 +92,12 @@ object CardValidation {
         return sum % 10 == 0
     }
 
-    fun number(raw: CharSequence): CardFieldError? {
+    fun number(raw: CharSequence, strings: PesaStrings = PesaStrings.en): CardFieldError? {
         val d = raw.filter { it.isDigit() }.toString()
         val brand = CardBrand.detect(d)
         return when {
-            d.isEmpty() -> CardFieldError(CardField.NUMBER, "Enter the card number.")
-            d.length !in brand.lengths || !luhn(d) -> CardFieldError(CardField.NUMBER, "This card number is not valid.")
+            d.isEmpty() -> CardFieldError(CardField.NUMBER, strings.numberEmpty)
+            d.length !in brand.lengths || !luhn(d) -> CardFieldError(CardField.NUMBER, strings.numberInvalid)
             else -> null
         }
     }
@@ -104,36 +113,36 @@ object CardValidation {
         return month to year
     }
 
-    fun expiry(month: Int, year: Int, nowYear: Int, nowMonth: Int): CardFieldError? = when {
-        month !in 1..12 || year < 2000 -> CardFieldError(CardField.EXPIRY, "Enter the expiry as MM/YY.")
-        year < nowYear || (year == nowYear && month < nowMonth) -> CardFieldError(CardField.EXPIRY, "This card has expired.")
-        year > nowYear + 25 -> CardFieldError(CardField.EXPIRY, "Enter the expiry as MM/YY.")
+    fun expiry(month: Int, year: Int, nowYear: Int, nowMonth: Int, strings: PesaStrings = PesaStrings.en): CardFieldError? = when {
+        month !in 1..12 || year < 2000 -> CardFieldError(CardField.EXPIRY, strings.expiryInvalid)
+        year < nowYear || (year == nowYear && month < nowMonth) -> CardFieldError(CardField.EXPIRY, strings.cardExpired)
+        year > nowYear + 25 -> CardFieldError(CardField.EXPIRY, strings.expiryInvalid)
         else -> null
     }
 
-    fun securityCode(raw: CharSequence, brand: CardBrand): CardFieldError? {
+    fun securityCode(raw: CharSequence, brand: CardBrand, strings: PesaStrings = PesaStrings.en): CardFieldError? {
         val d = raw.filter { it.isDigit() }.toString()
         val ok = if (brand == CardBrand.UNKNOWN) d.length in 3..4 else d.length == brand.cvvLength
-        return if (ok) null else CardFieldError(CardField.SECURITY_CODE, "Enter the ${brand.cvvLength}-digit security code.")
+        return if (ok) null else CardFieldError(CardField.SECURITY_CODE, strings.enterSecurityCode(brand.cvvLength))
     }
 
-    fun holderName(raw: String): CardFieldError? {
+    fun holderName(raw: String, strings: PesaStrings = PesaStrings.en): CardFieldError? {
         val t = raw.trim()
-        return if (t.length in 3..26) null else CardFieldError(CardField.HOLDER_NAME, "Enter the name as it appears on the card, 3 to 26 characters.")
+        return if (t.length in 3..26) null else CardFieldError(CardField.HOLDER_NAME, strings.holderNameLength)
     }
 
-    fun email(raw: String?): CardFieldError? {
+    fun email(raw: String?, strings: PesaStrings = PesaStrings.en): CardFieldError? {
         val t = raw?.trim().orEmpty()
         val at = t.indexOf('@')
-        return if (at > 0 && at < t.length - 1 && t.length <= 50) null else CardFieldError(CardField.EMAIL, "Enter a valid email address.")
+        return if (at > 0 && at < t.length - 1 && t.length <= 50) null else CardFieldError(CardField.EMAIL, strings.emailInvalid)
     }
 
     /** Every problem with the card, in field order. Empty means it may be sent. */
-    fun validate(card: CardDetails, nowYear: Int, nowMonth: Int): List<CardFieldError> = listOfNotNull(
-        number(card.digits()),
-        expiry(card.expiryMonth, card.expiryYear, nowYear, nowMonth),
-        securityCode(card.code(), card.brand),
-        holderName(card.holderName),
+    fun validate(card: CardDetails, nowYear: Int, nowMonth: Int, strings: PesaStrings = PesaStrings.en): List<CardFieldError> = listOfNotNull(
+        number(card.digits(), strings),
+        expiry(card.expiryMonth, card.expiryYear, nowYear, nowMonth, strings),
+        securityCode(card.code(), card.brand, strings),
+        holderName(card.holderName, strings),
     )
 
     /** Groups digits for display: 4-6-5 for Amex, 4-4-4-4(-3) otherwise. */

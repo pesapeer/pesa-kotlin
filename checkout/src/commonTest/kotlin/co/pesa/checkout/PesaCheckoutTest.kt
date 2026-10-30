@@ -28,7 +28,12 @@ class PesaCheckoutTest {
         return """{"intentId":"$intent","state":"$state","amount":"25.00","currency":"GBP","methods":["card"],"needsEmail":false,"returnUrl":"https://app.test/return"$a}"""
     }
 
-    private fun client(script: MutableList<String>, posts: MutableList<HttpRequestData> = mutableListOf(), status: (HttpRequestData) -> HttpStatusCode = { HttpStatusCode.OK }): PesaCheckout {
+    private fun client(
+        script: MutableList<String>,
+        posts: MutableList<HttpRequestData> = mutableListOf(),
+        locale: String? = null,
+        status: (HttpRequestData) -> HttpStatusCode = { HttpStatusCode.OK },
+    ): PesaCheckout {
         val engine = MockEngine { req ->
             when (req.method) {
                 HttpMethod.Post -> {
@@ -41,7 +46,7 @@ class PesaCheckoutTest {
                 }
             }
         }
-        return PesaCheckout(PesaCheckoutConfig(checkoutUrl = "https://checkout.test", pollInterval = 0, maxPolls = 5, challengePolls = 8), engine) { 2026 to 10 }
+        return PesaCheckout(PesaCheckoutConfig(checkoutUrl = "https://checkout.test", pollInterval = 0, maxPolls = 5, challengePolls = 8, locale = locale), engine) { 2026 to 10 }
     }
 
     private fun card() = CardDetails("4111 1111 1111 1111", 12, 2028, "000", "A Cardholder")
@@ -131,6 +136,28 @@ class PesaCheckoutTest {
     }
 
     @Test
+    fun errorsAreInTheClientLanguage() = runTest {
+        val refused = client(mutableListOf("""{"error":{"code":"invalid_request","message":"Bad card.","field":"cardNumber"}}"""), locale = "fr-BE") { HttpStatusCode.BadRequest }
+        val e = assertFailsWith<PesaCheckoutException> { refused.session(intent, secret) }
+        assertEquals(PesaCheckoutException.Code.INVALID_CARD, e.code)
+        assertEquals(PesaStrings.fr.numberInvalid, e.message)
+        assertEquals("Bad card.", e.gatewayMessage)
+
+        val local = client(mutableListOf(), locale = "zh")
+        val invalid = assertFailsWith<PesaCheckoutException> {
+            local.payWithCard(intent, secret, CardDetails("", 12, 2028, "000", "A Cardholder")) { }
+        }
+        assertEquals("请输入卡号。", invalid.message)
+    }
+
+    @Test
+    fun sessionReadsTheLocale() = runTest {
+        val c = client(mutableListOf(session("open").dropLast(1) + ""","locale":"fr-CA"}"""))
+        assertEquals("fr-CA", c.session(intent, secret).locale)
+        assertNull(Json { ignoreUnknownKeys = true }.decodeFromString(CheckoutSession.serializer(), session("open")).locale)
+    }
+
+    @Test
     fun sessionReadsTheLatestAttempt() = runTest {
         val c = client(mutableListOf(session("open", "requires_3ds")))
         val s = c.session(intent, secret)
@@ -163,15 +190,24 @@ class PesaCheckoutTest {
         val s = client(mutableListOf(session("open"))).session(intent, secret)
         assertFalse(s.canSaveCard)
         assertTrue(s.savedCards.isEmpty())
-        assertEquals(SavedCardSecurityCode.OPTIONAL, s.savedCardSecurityCode)
+        assertEquals(SavedCardSecurityCode.NEVER, s.savedCardSecurityCode)
     }
 
     @Test
-    fun unknownSavedCardSecurityCodeReadsAsOptional() = runTest {
+    fun unknownSavedCardSecurityCodeReadsAsNever() = runTest {
         val json = """{"intentId":"$intent","state":"open","amount":"25.00","currency":"GBP","savedCards":[{"token":"t","brand":"diners","last4":"0004","expiry":"01/2030","holderName":"A Payer"}],"savedCardSecurityCode":"sometimes"}"""
         val s = client(mutableListOf(json)).session(intent, secret)
-        assertEquals(SavedCardSecurityCode.OPTIONAL, s.savedCardSecurityCode)
+        assertEquals(SavedCardSecurityCode.NEVER, s.savedCardSecurityCode)
         assertEquals(CardBrand.UNKNOWN, s.savedCards.single().cardBrand)
+    }
+
+    @Test
+    fun savedCardBrandIsReadTolerantly() = runTest {
+        val json = """{"intentId":"$intent","state":"open","amount":"25.00","currency":"GBP","savedCardSecurityCode":"optional",""" +
+            """"savedCards":[{"token":"a","brand":"MC"},{"token":"b","brand":"American_Express"},{"token":"c","brand":"China UnionPay"}]}"""
+        val s = client(mutableListOf(json)).session(intent, secret)
+        assertEquals(SavedCardSecurityCode.OPTIONAL, s.savedCardSecurityCode)
+        assertEquals(listOf(CardBrand.MASTERCARD, CardBrand.AMEX, CardBrand.UNIONPAY), s.savedCards.map { it.cardBrand })
     }
 
     @Test
