@@ -9,7 +9,7 @@ plugins {
     alias(libs.plugins.maven.publish) apply false
 }
 
-val releaseVersion = providers.gradleProperty("version").orNull?.takeIf { it != "unspecified" } ?: "0.1.0-SNAPSHOT"
+val releaseVersion = providers.gradleProperty("version").orNull?.takeIf { it != "unspecified" } ?: "0.2.0-SNAPSHOT"
 
 allprojects {
     group = "co.pesa"

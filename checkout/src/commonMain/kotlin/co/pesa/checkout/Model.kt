@@ -57,6 +57,28 @@ data class Merchant(
     val supportUrl: String = "",
 )
 
+/** Whether the form asks the CVV again for a saved card. An unknown value reads as [OPTIONAL]. */
+@Serializable
+enum class SavedCardSecurityCode {
+    @SerialName("required") REQUIRED,
+    @SerialName("optional") OPTIONAL,
+    @SerialName("never") NEVER,
+}
+
+/** A card the customer kept on file. [token] is opaque: pass it to [PesaCheckout.payWithSavedCard] and nowhere else. */
+@Serializable
+data class SavedCard(
+    val token: String = "",
+    val brand: String = "",
+    val last4: String = "",
+    val expiry: String = "",
+    val holderName: String = "",
+) {
+    val cardBrand: CardBrand get() = CardBrand.entries.firstOrNull { it.wire == brand } ?: CardBrand.UNKNOWN
+
+    override fun toString(): String = "SavedCard($brand •••• $last4, $expiry)"
+}
+
 /** The checkout view of an intent, as the edge answers it. */
 @Serializable
 data class CheckoutSession(
@@ -73,6 +95,9 @@ data class CheckoutSession(
     val cancelUrl: String = "",
     val attempt: Attempt? = null,
     val expiresAt: String = "",
+    val canSaveCard: Boolean = false,
+    val savedCards: List<SavedCard> = emptyList(),
+    val savedCardSecurityCode: SavedCardSecurityCode = SavedCardSecurityCode.OPTIONAL,
 ) {
     val acceptsCard: Boolean get() = state == IntentState.OPEN && "card" in methods && attempt?.state.let { it == null || it == AttemptState.DECLINED || it == AttemptState.FAILED }
 }
@@ -114,8 +139,18 @@ internal data class CardChargeRequest(
     val securityCode: String,
     val holderName: String,
     val email: String? = null,
-    val saveCard: Boolean? = null,
+    val saveCard: Boolean = false,
 )
+
+@Serializable
+internal data class SavedCardChargeRequest(
+    val clientSecret: String,
+    val savedCard: SavedCardReference,
+    val email: String? = null,
+)
+
+@Serializable
+internal data class SavedCardReference(val token: String, val securityCode: String? = null)
 
 @Serializable
 internal data class ErrorBody(val error: ErrorDetail = ErrorDetail())

@@ -29,8 +29,8 @@ Maven Central:
 
 ```kotlin
 dependencies {
-    implementation("co.pesa:checkout:0.1.0")      // client
-    implementation("co.pesa:checkout-ui:0.1.0")   // Compose card form (optional)
+    implementation("co.pesa:checkout:0.2.0")      // client
+    implementation("co.pesa:checkout-ui:0.2.0")   // Compose card form (optional)
 }
 ```
 
@@ -76,13 +76,70 @@ If the system kills the app during the challenge, the app link brings the
 user back. Then call `checkout.await(intentId, clientSecret)` to continue
 the wait.
 
+## Saved cards
+
+A customer can keep a card for the next payment. Your server must set
+`customerReference` on the intent. Without it, the session offers no saved
+cards and ignores `saveCard`.
+
+The session tells the form what to show:
+
+- `canSaveCard`: the form may show the "Save this card" switch.
+- `savedCards`: the customer's cards, most recently used first. Each has
+  `brand`, `last4`, `expiry` (MM/YYYY) and `holderName`. The list is empty
+  when there are none.
+- `savedCardSecurityCode`: `REQUIRED`, `OPTIONAL` or `NEVER`. It tells
+  the form when to ask for the CVV again. An unknown value reads as
+  `OPTIONAL`.
+
+Make the form state from the session. `PesaCardForm` then shows the saved
+cards first and selects the first one. "Use another card" shows the card
+fields. The CVV field follows `savedCardSecurityCode`. The switch shows
+only when `canSaveCard` is true.
+
+```kotlin
+val formState = PesaCardFormState(session)
+
+val saved = formState.selectedSavedCard
+val result = try {
+    if (saved != null) {
+        checkout.payWithSavedCard(
+            intentId, clientSecret, saved.token, formState.toSavedSecurityCode(),
+            email = formState.email.takeIf { session.needsEmail },
+            openChallenge = defaultChallengeOpener(activity)::open,
+        )
+    } else {
+        checkout.payWithCard(
+            intentId, clientSecret, formState.toCard(),
+            email = formState.email.takeIf { session.needsEmail },
+            saveCard = formState.savesCard,
+            openChallenge = defaultChallengeOpener(activity)::open,
+        )
+    }
+} finally {
+    formState.clear()
+}
+```
+
+Rules:
+
+- The token is opaque. Do not log it, show it or put it in a URL.
+- The SDK sends the token and the CVV in the request body only.
+- `payWithSavedCard` wipes the CVV array before it returns.
+- The gateway keeps a card only after a successful charge. A decline
+  keeps nothing.
+- A refused token gives `INVALID_CARD`. Ask the customer to choose
+  another card.
+- The 3-D Secure challenge and the result are the same as for a typed
+  card.
+
 ## Error codes
 
 `PesaCheckoutException.code` is one of:
 
 | Code | Meaning |
 |---|---|
-| `INVALID_CARD` | The card failed local validation. |
+| `INVALID_CARD` | The card failed local validation, or the checkout service refused the card or the saved card. |
 | `INVALID_REQUEST` | The checkout service refused the request. |
 | `NOT_FOUND` | Unknown intent or wrong client secret. |
 | `INTENT_CLOSED` | The intent is settled, cancelled or expired. |
@@ -151,7 +208,7 @@ Repository setup: secrets `MAVEN_CENTRAL_USERNAME`, `MAVEN_CENTRAL_PASSWORD`,
 ```
 
 `./gradlew publishToMavenLocal -Pversion=X.Y.Z` publishes to `~/.m2` for a
-local consumer. Without `-Pversion` the build is `0.1.0-SNAPSHOT`.
+local consumer. Without `-Pversion` the build is `0.2.0-SNAPSHOT`.
 
 Properties: `-Pskip.android=true`, `-Pskip.ios=true`, `-Pskip.compose=true`
 drop a target or the UI module on a machine without its toolchain. iOS

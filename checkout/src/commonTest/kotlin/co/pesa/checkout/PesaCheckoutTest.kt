@@ -15,6 +15,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class PesaCheckoutTest {
@@ -136,5 +138,102 @@ class PesaCheckoutTest {
         assertTrue(!s.acceptsCard)
         val fresh = Json { ignoreUnknownKeys = true }.decodeFromString(CheckoutSession.serializer(), session("open"))
         assertTrue(fresh.acceptsCard)
+    }
+
+    private fun bodyOf(req: HttpRequestData) = Json.parseToJsonElement((req.body as TextContent).text).jsonObject
+
+    @Test
+    fun sessionDecodesSavedCards() = runTest {
+        val json = """{"intentId":"$intent","state":"open","amount":"25.00","currency":"GBP","methods":["card"],"canSaveCard":true,""" +
+            """"savedCards":[{"token":"tok_secret_1","brand":"visa","last4":"4242","expiry":"12/2028","holderName":"A Payer"}],"savedCardSecurityCode":"required"}"""
+        val s = client(mutableListOf(json)).session(intent, secret)
+        assertTrue(s.canSaveCard)
+        assertEquals(SavedCardSecurityCode.REQUIRED, s.savedCardSecurityCode)
+        val card = s.savedCards.single()
+        assertEquals("tok_secret_1", card.token)
+        assertEquals(CardBrand.VISA, card.cardBrand)
+        assertEquals("4242", card.last4)
+        assertEquals("12/2028", card.expiry)
+        assertEquals("A Payer", card.holderName)
+        assertFalse("tok_secret_1" in s.toString(), "token stays out of toString")
+    }
+
+    @Test
+    fun sessionWithoutSavedCardsUsesDefaults() = runTest {
+        val s = client(mutableListOf(session("open"))).session(intent, secret)
+        assertFalse(s.canSaveCard)
+        assertTrue(s.savedCards.isEmpty())
+        assertEquals(SavedCardSecurityCode.OPTIONAL, s.savedCardSecurityCode)
+    }
+
+    @Test
+    fun unknownSavedCardSecurityCodeReadsAsOptional() = runTest {
+        val json = """{"intentId":"$intent","state":"open","amount":"25.00","currency":"GBP","savedCards":[{"token":"t","brand":"diners","last4":"0004","expiry":"01/2030","holderName":"A Payer"}],"savedCardSecurityCode":"sometimes"}"""
+        val s = client(mutableListOf(json)).session(intent, secret)
+        assertEquals(SavedCardSecurityCode.OPTIONAL, s.savedCardSecurityCode)
+        assertEquals(CardBrand.UNKNOWN, s.savedCards.single().cardBrand)
+    }
+
+    @Test
+    fun saveCardIsSentOnlyWhenAsked() = runTest {
+        val posts = mutableListOf<HttpRequestData>()
+        val c = client(mutableListOf(session("settled", "captured"), session("settled", "captured")), posts)
+        c.payWithCard(intent, secret, card(), saveCard = true) { }
+        c.payWithCard(intent, secret, card()) { }
+        assertEquals("true", bodyOf(posts[0])["saveCard"]!!.jsonPrimitive.content)
+        assertNull(bodyOf(posts[1])["saveCard"])
+    }
+
+    @Test
+    fun savedCardPostsTokenAndSecurityCode() = runTest {
+        val posts = mutableListOf<HttpRequestData>()
+        val c = client(mutableListOf(session("open", "pending"), session("settled", "captured")), posts)
+        val code = "123".toCharArray()
+        val r = c.payWithSavedCard(intent, secret, "tok_secret_1", code, email = " a@b.co ") { error("no challenge expected") }
+        assertEquals(IntentState.SETTLED, r.state)
+        assertEquals("\u0000\u0000\u0000", code.concatToString(), "security code wiped after submit")
+
+        val body = bodyOf(posts.single())
+        assertEquals("https://checkout.test/c/$intent/card", posts.single().url.toString())
+        assertEquals(setOf("clientSecret", "savedCard", "email"), body.keys)
+        assertEquals("a@b.co", body["email"]!!.jsonPrimitive.content)
+        val saved = body["savedCard"]!!.jsonObject
+        assertEquals("tok_secret_1", saved["token"]!!.jsonPrimitive.content)
+        assertEquals("123", saved["securityCode"]!!.jsonPrimitive.content)
+        assertFalse("tok_secret_1" in posts.single().url.toString())
+    }
+
+    @Test
+    fun savedCardWithoutSecurityCodeOmitsIt() = runTest {
+        val posts = mutableListOf<HttpRequestData>()
+        val c = client(mutableListOf(session("settled", "captured")), posts)
+        c.payWithSavedCard(intent, secret, "tok_secret_1") { }
+        val body = bodyOf(posts.single())
+        assertEquals(setOf("clientSecret", "savedCard"), body.keys)
+        assertEquals(setOf("token"), body["savedCard"]!!.jsonObject.keys)
+    }
+
+    @Test
+    fun savedCardFollowsTheChallenge() = runTest {
+        var opened = 0
+        val c = client(mutableListOf(session("open", "requires_3ds"), session("open", "requires_3ds"), session("settled", "captured")))
+        val r = c.payWithSavedCard(intent, secret, "tok_secret_1") { opened++ }
+        assertEquals(1, opened)
+        assertEquals(IntentState.SETTLED, r.state)
+    }
+
+    @Test
+    fun invalidSavedCardSecurityCodeNeverLeavesTheDevice() = runTest {
+        val posts = mutableListOf<HttpRequestData>()
+        val c = client(mutableListOf(), posts)
+        val e = assertFailsWith<PesaCheckoutException> { c.payWithSavedCard(intent, secret, "tok_secret_1", "12".toCharArray()) { } }
+        assertEquals(PesaCheckoutException.Code.INVALID_CARD, e.code)
+        assertTrue(posts.isEmpty())
+    }
+
+    @Test
+    fun refusedSavedCardIsAnInvalidCard() = runTest {
+        val c = client(mutableListOf("""{"error":{"code":"invalid_request","message":"Choose another card.","field":"savedCard.token"}}""")) { HttpStatusCode.BadRequest }
+        assertEquals(PesaCheckoutException.Code.INVALID_CARD, assertFailsWith<PesaCheckoutException> { c.session(intent, secret) }.code)
     }
 }

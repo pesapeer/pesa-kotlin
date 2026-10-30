@@ -51,7 +51,7 @@ class PesaCheckout internal constructor(
     constructor(config: PesaCheckoutConfig = PesaCheckoutConfig()) :
         this(config, httpClientEngine(config.pins))
 
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; coerceInputValues = true }
     private val http = HttpClient(engine) {
         expectSuccess = false
         install(ContentNegotiation) { json(this@PesaCheckout.json) }
@@ -81,7 +81,7 @@ class PesaCheckout internal constructor(
         clientSecret: String,
         card: CardDetails,
         email: String? = null,
-        saveCard: Boolean? = null,
+        saveCard: Boolean = false,
         openChallenge: suspend (url: String) -> Unit,
     ): CheckoutResult {
         try {
@@ -103,6 +103,41 @@ class PesaCheckout internal constructor(
             return await(intentId, clientSecret, first, openChallenge)
         } finally {
             card.wipe()
+        }
+    }
+
+    /**
+     * Charges one of the session's [CheckoutSession.savedCards] and waits for
+     * the acquirer's answer, as [payWithCard] does. Send [securityCode] when
+     * [CheckoutSession.savedCardSecurityCode] is required, or when the
+     * cardholder typed one. It is wiped before this function returns.
+     */
+    suspend fun payWithSavedCard(
+        intentId: String,
+        clientSecret: String,
+        token: String,
+        securityCode: CharArray? = null,
+        email: String? = null,
+        openChallenge: suspend (url: String) -> Unit,
+    ): CheckoutResult {
+        try {
+            val code = securityCode?.concatToString()?.ifEmpty { null }
+            val problem = code?.let { CardValidation.securityCode(it, CardBrand.UNKNOWN) }
+            if (problem != null) throw PesaCheckoutException(PesaCheckoutException.Code.INVALID_CARD, problem.message)
+            val res = transport { http.post("$base/c/$intentId/card") {
+                contentType(ContentType.Application.Json)
+                setBody(
+                    SavedCardChargeRequest(
+                        clientSecret = clientSecret,
+                        savedCard = SavedCardReference(token = token, securityCode = code),
+                        email = email?.trim()?.ifEmpty { null },
+                    ),
+                )
+            } }
+            val first: CheckoutSession = parse(res)
+            return await(intentId, clientSecret, first, openChallenge)
+        } finally {
+            securityCode?.fill('\u0000')
         }
     }
 
@@ -160,7 +195,7 @@ class PesaCheckout internal constructor(
     fun close() = http.close()
 
     private companion object {
-        val CARD_FIELDS = setOf("cardNumber", "expiryMonth", "expiryYear", "securityCode", "holderName")
+        val CARD_FIELDS = setOf("cardNumber", "expiryMonth", "expiryYear", "securityCode", "holderName", "savedCard.token", "savedCard.securityCode")
     }
 }
 
