@@ -188,7 +188,7 @@ class PesaCheckoutTest {
 
         val local = client(mutableListOf(), locale = "zh")
         val invalid = assertFailsWith<PesaCheckoutException> {
-            local.payWithCard(intent, secret, CardDetails("", 12, 2028, "000", "A Cardholder")) { }
+            local.payWithCard(intent, secret, CardDetails("", 12, 2028, "000", "A Cardholder"), openChallenge = ChallengeOpener { })
         }
         assertEquals("请输入卡号。", invalid.message)
     }

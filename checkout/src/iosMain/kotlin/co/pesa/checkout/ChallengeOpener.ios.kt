@@ -9,7 +9,7 @@ import platform.Foundation.NSURLRequest
 import platform.SafariServices.SFSafariViewController
 import platform.UIKit.UIApplication
 import platform.UIKit.UIBarButtonItem
-import platform.UIKit.UIBarButtonSystemItemClose
+import platform.UIKit.UIBarButtonSystemItem
 import platform.UIKit.UIColor
 import platform.UIKit.UIModalPresentationFullScreen
 import platform.UIKit.UINavigationController
@@ -87,9 +87,9 @@ internal class ChallengeViewController(
     override fun viewDidLoad() {
         super.viewDidLoad()
         title = PesaStrings.resolve().challengeTitle
-        view.backgroundColor = UIColor.systemBackgroundColor
+        view.backgroundColor = UIColor.whiteColor
         navigationItem.leftBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem = UIBarButtonSystemItemClose,
+            barButtonSystemItem = UIBarButtonSystemItem.UIBarButtonSystemItemClose,
             target = this,
             action = NSSelectorFromString("closeTapped"),
         )
