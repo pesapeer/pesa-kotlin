@@ -49,7 +49,10 @@ data class PesaStrings(
     val errorRateLimited: String,
     val errorNetwork: String,
     val errorTimeout: String,
+    val errorChallengeCancelled: String,
     val errorServer: String,
+    /** The title of the in-app 3-D Secure page. */
+    val challengeTitle: String,
 ) {
     /** [amount] (a decimal string such as `2.00`) in [currency], formatted by the platform for [tag]. */
     fun formatAmount(amount: String, currency: String): String =
@@ -81,6 +84,7 @@ data class PesaStrings(
         PesaCheckoutException.Code.RATE_LIMITED -> errorRateLimited
         PesaCheckoutException.Code.NETWORK -> errorNetwork
         PesaCheckoutException.Code.TIMEOUT -> errorTimeout
+        PesaCheckoutException.Code.CHALLENGE_CANCELLED -> errorChallengeCancelled
         PesaCheckoutException.Code.SERVER -> errorServer
     }
 
@@ -97,7 +101,8 @@ data class PesaStrings(
         "errorInvalidRequest" to errorInvalidRequest, "errorNotFound" to errorNotFound,
         "errorIntentClosed" to errorIntentClosed, "errorAttemptInProgress" to errorAttemptInProgress,
         "errorRateLimited" to errorRateLimited, "errorNetwork" to errorNetwork,
-        "errorTimeout" to errorTimeout, "errorServer" to errorServer,
+        "errorTimeout" to errorTimeout, "errorChallengeCancelled" to errorChallengeCancelled,
+        "errorServer" to errorServer, "challengeTitle" to challengeTitle,
     )
 
     companion object {

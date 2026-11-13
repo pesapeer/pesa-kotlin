@@ -149,6 +149,8 @@ class PesaCheckoutException(
         RATE_LIMITED,
         NETWORK,
         TIMEOUT,
+        /** The cardholder closed the 3-D Secure page before it finished. */
+        CHALLENGE_CANCELLED,
         SERVER,
     }
 }

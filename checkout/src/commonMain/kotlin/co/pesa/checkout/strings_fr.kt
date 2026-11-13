@@ -36,4 +36,6 @@ internal val stringsFr = PesaStrings(
     errorNetwork = "Impossible de joindre le service de paiement. Vérifiez votre connexion et réessayez.",
     errorTimeout = "Le paiement est toujours en cours de traitement. Vérifiez auprès du commerçant avant de payer à nouveau.",
     errorServer = "Le paiement n’a pas pu aboutir. Réessayez.",
+    errorChallengeCancelled = "L’authentification bancaire a été annulée. Réessayez pour finaliser le paiement.",
+    challengeTitle = "Vérifiez votre carte",
 )

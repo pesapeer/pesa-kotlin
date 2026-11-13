@@ -35,4 +35,6 @@ internal val stringsEn = PesaStrings(
     errorNetwork = "We couldn’t reach the checkout. Check your connection and try again.",
     errorTimeout = "The payment is still being processed. Check with the merchant before paying again.",
     errorServer = "The payment couldn’t be completed. Try again.",
+    errorChallengeCancelled = "Bank authentication was cancelled. Try again to complete the payment.",
+    challengeTitle = "Verify your card",
 )

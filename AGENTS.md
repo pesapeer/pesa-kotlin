@@ -10,8 +10,9 @@ Humans: read README.md first.
   Targets: Android, iOS, JVM.
 - `co.pesa:checkout-ui`: Compose Multiplatform `PesaCardForm` and
   `PesaSecureScreen`.
-- Native card fields. 3-D Secure in Custom Tabs (Android) or
-  `SFSafariViewController` (iOS). SPKI-pinned TLS to `checkout.pesa.co`.
+- Native card fields. 3-D Secure in a full-screen web view inside the app
+  (`ChallengeSurface.IN_APP`, the default) or the system browser
+  (`ChallengeSurface.BROWSER`). SPKI-pinned TLS to `checkout.pesa.co`.
 - Native iOS apps use pesa-ios instead. Flutter apps use pesa-flutter.
 
 ## Hard rules
@@ -39,7 +40,7 @@ Humans: read README.md first.
    the amount, currency, `needsEmail` and offered methods for the screen.
 5. App: show `PesaCardForm(state = formState)` inside `PesaSecureScreen {}`.
 6. App: on pay, `checkout.payWithCard(intentId, clientSecret,
-   formState.toCard(), email = ..., openChallenge = defaultChallengeOpener(activity)::open)`.
+   formState.toCard(), email = ..., openChallenge = challengePresenter(ChallengeSurface.IN_APP, activity))`.
    Then `formState.clear()` in a `finally` block.
 7. App: switch on `result.state`: `SETTLED` or `AUTHORIZED` is success,
    `OPEN` is a decline (the customer can try again), `EXPIRED` or

@@ -49,7 +49,7 @@ payment with native fields.
            checkout.payWithCard(
                intentId, clientSecret, formState.toCard(),
                email = formState.email.takeIf { session.needsEmail },
-               openChallenge = defaultChallengeOpener(activity)::open,
+               openChallenge = challengePresenter(ChallengeSurface.IN_APP, activity),
            )
        } catch (e: PesaCheckoutException) {
            // e.code: RATE_LIMITED -> wait and retry; NETWORK -> check connection or pins

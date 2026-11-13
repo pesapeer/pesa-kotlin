@@ -56,7 +56,7 @@ class PesaCheckoutTest {
         val posts = mutableListOf<HttpRequestData>()
         val c = client(mutableListOf(session("open", "pending"), session("open", "pending"), session("settled", "captured")), posts)
         val card = card()
-        val r = c.payWithCard(intent, secret, card, openChallenge = { error("no challenge expected") })
+        val r = c.payWithCard(intent, secret, card, openChallenge = ChallengeOpener { error("no challenge expected") })
         assertEquals(IntentState.SETTLED, r.state)
         assertTrue(r.succeeded)
         assertEquals("1111", r.attempt?.card?.last4)
@@ -75,18 +75,61 @@ class PesaCheckoutTest {
             session("open", "pending"), session("open", "requires_3ds"), session("open", "requires_3ds"),
             session("open", "pending"), session("settled", "captured"),
         ))
-        val r = c.payWithCard(intent, secret, card()) { url ->
+        val r = c.payWithCard(intent, secret, card(), openChallenge = ChallengeOpener { url ->
             opened++
             assertTrue(url.startsWith("https://checkout.test/c/$intent/challenge"))
-        }
+        })
         assertEquals(1, opened)
         assertEquals(IntentState.SETTLED, r.state)
+    }
+
+    private class FakePresenter : ChallengePresenter {
+        var opened = 0
+        var closed = 0
+        var cancel: (() -> Unit)? = null
+        override suspend fun open(url: String, onCancelled: () -> Unit) {
+            opened++
+            cancel = onCancelled
+        }
+        override fun close() { closed++ }
+    }
+
+    @Test
+    fun challengeIsClosedOnceTheAttemptSettles() = runTest {
+        val presenter = FakePresenter()
+        val c = client(mutableListOf(session("open", "requires_3ds"), session("open", "requires_3ds"), session("settled", "captured")))
+        val r = c.payWithCard(intent, secret, card(), openChallenge = presenter)
+        assertEquals(IntentState.SETTLED, r.state)
+        assertEquals(1, presenter.opened)
+        assertEquals(1, presenter.closed)
+    }
+
+    @Test
+    fun challengeTheCardholderDismissesIsCancelled() = runTest {
+        val presenter = object : ChallengePresenter {
+            var closed = 0
+            override suspend fun open(url: String, onCancelled: () -> Unit) = onCancelled()
+            override fun close() { closed++ }
+        }
+        val c = client(mutableListOf(session("open", "requires_3ds"), session("open", "requires_3ds"), session("open", "requires_3ds")))
+        val e = assertFailsWith<PesaCheckoutException> { c.payWithCard(intent, secret, card(), openChallenge = presenter) }
+        assertEquals(PesaCheckoutException.Code.CHALLENGE_CANCELLED, e.code)
+        assertEquals(1, presenter.closed)
+    }
+
+    @Test
+    fun challengeIsClosedWhenThePollTimesOut() = runTest {
+        val presenter = FakePresenter()
+        val c = client(mutableListOf(session("open", "requires_3ds")))
+        val e = assertFailsWith<PesaCheckoutException> { c.payWithCard(intent, secret, card(), openChallenge = presenter) }
+        assertEquals(PesaCheckoutException.Code.TIMEOUT, e.code)
+        assertEquals(1, presenter.closed)
     }
 
     @Test
     fun declineLeavesTheIntentOpen() = runTest {
         val c = client(mutableListOf(session("open", "pending"), session("open", "declined")))
-        val r = c.payWithCard(intent, secret, card()) { }
+        val r = c.payWithCard(intent, secret, card(), openChallenge = ChallengeOpener { })
         assertEquals(IntentState.OPEN, r.state)
         assertEquals(AttemptState.DECLINED, r.attempt?.state)
         assertTrue(!r.succeeded)
@@ -95,7 +138,7 @@ class PesaCheckoutTest {
     @Test
     fun manualCaptureEndsAuthorized() = runTest {
         val c = client(mutableListOf(session("open", "pending"), session("authorized", "authorized")))
-        val r = c.payWithCard(intent, secret, card()) { }
+        val r = c.payWithCard(intent, secret, card(), openChallenge = ChallengeOpener { })
         assertEquals(IntentState.AUTHORIZED, r.state)
         assertTrue(r.succeeded)
     }
@@ -104,7 +147,7 @@ class PesaCheckoutTest {
     fun pollingCeiling() = runTest {
         val script = MutableList(20) { session("open", "pending") }
         val c = client(script)
-        val e = assertFailsWith<PesaCheckoutException> { c.payWithCard(intent, secret, card()) { } }
+        val e = assertFailsWith<PesaCheckoutException> { c.payWithCard(intent, secret, card(), openChallenge = ChallengeOpener { }) }
         assertEquals(PesaCheckoutException.Code.TIMEOUT, e.code)
         assertEquals(20 - 1 - 5, script.size, "one post, then maxPolls reads")
     }
@@ -114,7 +157,7 @@ class PesaCheckoutTest {
         val posts = mutableListOf<HttpRequestData>()
         val c = client(mutableListOf(), posts)
         val e = assertFailsWith<PesaCheckoutException> {
-            c.payWithCard(intent, secret, CardDetails("4111111111111112", 12, 2028, "000", "A Cardholder")) { }
+            c.payWithCard(intent, secret, CardDetails("4111111111111112", 12, 2028, "000", "A Cardholder"), openChallenge = ChallengeOpener { })
         }
         assertEquals(PesaCheckoutException.Code.INVALID_CARD, e.code)
         assertTrue(posts.isEmpty())
@@ -214,8 +257,8 @@ class PesaCheckoutTest {
     fun saveCardIsSentOnlyWhenAsked() = runTest {
         val posts = mutableListOf<HttpRequestData>()
         val c = client(mutableListOf(session("settled", "captured"), session("settled", "captured")), posts)
-        c.payWithCard(intent, secret, card(), saveCard = true) { }
-        c.payWithCard(intent, secret, card()) { }
+        c.payWithCard(intent, secret, card(), saveCard = true, openChallenge = ChallengeOpener { })
+        c.payWithCard(intent, secret, card(), openChallenge = ChallengeOpener { })
         assertEquals("true", bodyOf(posts[0])["saveCard"]!!.jsonPrimitive.content)
         assertNull(bodyOf(posts[1])["saveCard"])
     }
@@ -225,7 +268,7 @@ class PesaCheckoutTest {
         val posts = mutableListOf<HttpRequestData>()
         val c = client(mutableListOf(session("open", "pending"), session("settled", "captured")), posts)
         val code = "123".toCharArray()
-        val r = c.payWithSavedCard(intent, secret, "tok_secret_1", code, email = " a@b.co ") { error("no challenge expected") }
+        val r = c.payWithSavedCard(intent, secret, "tok_secret_1", code, email = " a@b.co ", openChallenge = ChallengeOpener { error("no challenge expected") })
         assertEquals(IntentState.SETTLED, r.state)
         assertEquals("\u0000\u0000\u0000", code.concatToString(), "security code wiped after submit")
 
@@ -243,7 +286,7 @@ class PesaCheckoutTest {
     fun savedCardWithoutSecurityCodeOmitsIt() = runTest {
         val posts = mutableListOf<HttpRequestData>()
         val c = client(mutableListOf(session("settled", "captured")), posts)
-        c.payWithSavedCard(intent, secret, "tok_secret_1") { }
+        c.payWithSavedCard(intent, secret, "tok_secret_1", openChallenge = ChallengeOpener { })
         val body = bodyOf(posts.single())
         assertEquals(setOf("clientSecret", "savedCard"), body.keys)
         assertEquals(setOf("token"), body["savedCard"]!!.jsonObject.keys)
@@ -253,7 +296,7 @@ class PesaCheckoutTest {
     fun savedCardFollowsTheChallenge() = runTest {
         var opened = 0
         val c = client(mutableListOf(session("open", "requires_3ds"), session("open", "requires_3ds"), session("settled", "captured")))
-        val r = c.payWithSavedCard(intent, secret, "tok_secret_1") { opened++ }
+        val r = c.payWithSavedCard(intent, secret, "tok_secret_1", openChallenge = ChallengeOpener { opened++ })
         assertEquals(1, opened)
         assertEquals(IntentState.SETTLED, r.state)
     }
@@ -262,7 +305,7 @@ class PesaCheckoutTest {
     fun invalidSavedCardSecurityCodeNeverLeavesTheDevice() = runTest {
         val posts = mutableListOf<HttpRequestData>()
         val c = client(mutableListOf(), posts)
-        val e = assertFailsWith<PesaCheckoutException> { c.payWithSavedCard(intent, secret, "tok_secret_1", "12".toCharArray()) { } }
+        val e = assertFailsWith<PesaCheckoutException> { c.payWithSavedCard(intent, secret, "tok_secret_1", "12".toCharArray(), openChallenge = ChallengeOpener { }) }
         assertEquals(PesaCheckoutException.Code.INVALID_CARD, e.code)
         assertTrue(posts.isEmpty())
     }

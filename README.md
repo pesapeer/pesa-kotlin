@@ -13,14 +13,14 @@ Native iOS apps use [pesa-ios](https://github.com/pesapeer/pesa-ios)
 instead. Flutter apps use [pesa-flutter](https://github.com/pesapeer/pesa-flutter).
 
 The app shows its own card fields. The SDK sends the card once to
-`checkout.pesa.co` over pinned TLS. It runs 3-D Secure in the system
-browser sheet. It returns the result the device saw.
+`checkout.pesa.co` over pinned TLS. It runs 3-D Secure in a full-screen
+page inside the app. It returns the result the device saw.
 
 ## Modules
 
 | Artifact | Content | Targets |
 |---|---|---|
-| `co.pesa:checkout` | Client, card validation, 3-D Secure opener. | Android, iOS (static framework `PesaCheckout`), JVM. |
+| `co.pesa:checkout` | Client, card validation, 3-D Secure page. | Android, iOS (static framework `PesaCheckout`), JVM. |
 | `co.pesa:checkout-ui` | Compose Multiplatform card form (`PesaCardForm`) and `PesaSecureScreen`. | Android, iOS, JVM. |
 
 ## Install
@@ -45,7 +45,8 @@ coordinates to `commonMain`.
 3. The app collects the card with `PesaCardForm` inside `PesaSecureScreen`.
    You can use your own fields instead.
 4. The app calls `payWithCard`. The SDK posts the card, polls the result,
-   and opens the 3-D Secure challenge when the issuer asks.
+   shows the 3-D Secure challenge when the issuer asks, and closes it when
+   the attempt settles.
 5. **Your server trusts only the gateway.** It fulfils the order on the
    `intent.state_changed` event or on `GET /v1/intents/{reference}`.
    It must not trust the result the app saw.
@@ -61,7 +62,7 @@ val session = checkout.session(intentId, clientSecret)
 val result = checkout.payWithCard(
     intentId, clientSecret, formState.toCard(),
     email = formState.email.takeIf { session.needsEmail },
-    openChallenge = defaultChallengeOpener(activity)::open,  // Custom Tabs on Android
+    openChallenge = challengePresenter(ChallengeSurface.IN_APP, activity),
 )
 formState.clear()
 
@@ -72,9 +73,17 @@ when (result.state) {
 }
 ```
 
-If the system kills the app during the challenge, the app link brings the
-user back. Then call `checkout.await(intentId, clientSecret)` to continue
-the wait.
+`challengePresenter(surface, activity)` picks where the challenge shows.
+`ChallengeSurface.IN_APP`, the default, is a full-screen web view inside
+the app (`PesaChallengeActivity` on Android, a `WKWebView` controller on
+iOS). The customer never leaves the app. A customer who closes the page
+gets `PesaCheckoutException` with `Code.CHALLENGE_CANCELLED`.
+`ChallengeSurface.BROWSER` is the system browser (Custom Tabs,
+`SFSafariViewController`); with it the intent's `returnUrl`, your app
+link, brings the user back. Any `ChallengePresenter` of your own works too.
+
+If the system kills the app during the challenge, call
+`checkout.await(intentId, clientSecret)` on return to continue the wait.
 
 ## Saved cards
 
@@ -141,14 +150,14 @@ val result = try {
         checkout.payWithSavedCard(
             intentId, clientSecret, saved.token, formState.toSavedSecurityCode(),
             email = formState.email.takeIf { session.needsEmail },
-            openChallenge = defaultChallengeOpener(activity)::open,
+            openChallenge = challengePresenter(ChallengeSurface.IN_APP, activity),
         )
     } else {
         checkout.payWithCard(
             intentId, clientSecret, formState.toCard(),
             email = formState.email.takeIf { session.needsEmail },
             saveCard = formState.savesCard,
-            openChallenge = defaultChallengeOpener(activity)::open,
+            openChallenge = challengePresenter(ChallengeSurface.IN_APP, activity),
         )
     }
 } finally {

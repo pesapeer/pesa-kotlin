@@ -6,7 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- 3-D Secure runs in a full-screen web view inside the app by default.
+  `challengePresenter(surface, activity)` replaces `defaultChallengeOpener`:
+  `ChallengeSurface.IN_APP` (the default) is that page
+  (`PesaChallengeActivity` on Android, a `WKWebView` controller on iOS),
+  `ChallengeSurface.BROWSER` the Custom Tabs / `SFSafariViewController`
+  surface it used to be. The SDK closes the page once the attempt
+  settles; the customer no longer leaves the app and the return page's
+  bounce to the app's scheme is no longer needed for cards.
+- `payWithCard`, `payWithSavedCard` and `await` take `openChallenge:
+  ChallengePresenter` instead of a `suspend (String) -> Unit`. Pass
+  `challengePresenter(...)`, or wrap a lambda in `ChallengeOpener { url -> … }`.
+
 ### Added
+- `ChallengePresenter`: `open(url, onCancelled)` and `close()`.
+  `ChallengeOpener` is the open-only form.
+- `PesaCheckoutException.Code.CHALLENGE_CANCELLED` when the cardholder
+  closes the page before it finished, with `PesaStrings.errorChallengeCancelled`.
+- `PesaStrings.challengeTitle`, the page's title.
 - Languages: `en`, `fr`, `fr-CA` and `zh-Hans`. `PesaStrings` in
   `commonMain` holds every string, one table per language
   (`PesaStrings.en`, `fr`, `frCA`, `zhHans`). `PesaStrings.resolve(locale,

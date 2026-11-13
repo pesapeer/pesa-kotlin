@@ -73,11 +73,12 @@ class PesaCheckout internal constructor(
     /**
      * Charges the card and waits for the acquirer's answer.
      *
-     * [openChallenge] is called at most once, with the page to show the
-     * cardholder when the issuer asks them to authenticate; the app opens it
-     * in Custom Tabs or SFSafariViewController (see [defaultChallengeOpener])
-     * and this call keeps polling until the attempt settles. The card is
-     * wiped before this function returns, whatever happened.
+     * [openChallenge] shows the page the cardholder authenticates on when
+     * the issuer asks: `challengePresenter(ChallengeSurface.IN_APP, activity)`
+     * for a full-screen web view inside the app, `ChallengeSurface.BROWSER`
+     * for the system browser, or your own [ChallengePresenter]. This call
+     * keeps polling until the attempt settles, then closes the page. The
+     * card is wiped before this function returns, whatever happened.
      */
     suspend fun payWithCard(
         intentId: String,
@@ -85,7 +86,7 @@ class PesaCheckout internal constructor(
         card: CardDetails,
         email: String? = null,
         saveCard: Boolean = false,
-        openChallenge: suspend (url: String) -> Unit,
+        openChallenge: ChallengePresenter,
     ): CheckoutResult {
         try {
             val (y, m) = now()
@@ -121,7 +122,7 @@ class PesaCheckout internal constructor(
         token: String,
         securityCode: CharArray? = null,
         email: String? = null,
-        openChallenge: suspend (url: String) -> Unit,
+        openChallenge: ChallengePresenter,
     ): CheckoutResult {
         try {
             val code = securityCode?.concatToString()?.ifEmpty { null }
@@ -145,39 +146,48 @@ class PesaCheckout internal constructor(
     }
 
     /** Resumes waiting on an intent, e.g. after the app was backgrounded for the challenge. */
-    suspend fun await(intentId: String, clientSecret: String, openChallenge: suspend (url: String) -> Unit = {}): CheckoutResult =
+    suspend fun await(intentId: String, clientSecret: String, openChallenge: ChallengePresenter = ChallengeOpener {}): CheckoutResult =
         await(intentId, clientSecret, session(intentId, clientSecret), openChallenge)
 
     private suspend fun await(
         intentId: String,
         clientSecret: String,
         initial: CheckoutSession,
-        openChallenge: suspend (url: String) -> Unit,
+        openChallenge: ChallengePresenter,
     ): CheckoutResult {
         var s = initial
         var challengeOpened = false
+        var challengeCancelled = false
         var polls = 0
-        while (true) {
-            val a = s.attempt
-            when {
-                s.state.isFinal && a?.state != AttemptState.REQUIRES_3DS -> return CheckoutResult(s.state, s.intentId, a)
-                a == null -> return CheckoutResult(s.state, s.intentId, null)
-                a.state.isSettled || a.state == AttemptState.UNKNOWN -> return CheckoutResult(s.state, s.intentId, a)
-                a.state == AttemptState.REQUIRES_3DS && !challengeOpened -> {
-                    challengeOpened = true
-                    openChallenge(a.challengeUrl.ifEmpty { challengeUrl(intentId, clientSecret) })
+        try {
+            while (true) {
+                val a = s.attempt
+                when {
+                    s.state.isFinal && a?.state != AttemptState.REQUIRES_3DS -> return CheckoutResult(s.state, s.intentId, a)
+                    a == null -> return CheckoutResult(s.state, s.intentId, null)
+                    a.state.isSettled || a.state == AttemptState.UNKNOWN -> return CheckoutResult(s.state, s.intentId, a)
+                    challengeCancelled -> throw PesaCheckoutException(
+                        PesaCheckoutException.Code.CHALLENGE_CANCELLED,
+                        strings(s).errorMessage(PesaCheckoutException.Code.CHALLENGE_CANCELLED),
+                    )
+                    a.state == AttemptState.REQUIRES_3DS && !challengeOpened -> {
+                        challengeOpened = true
+                        openChallenge.open(a.challengeUrl.ifEmpty { challengeUrl(intentId, clientSecret) }) { challengeCancelled = true }
+                    }
+                }
+                val limit = if (challengeOpened) config.challengePolls else config.maxPolls
+                if (++polls > limit) {
+                    throw PesaCheckoutException(PesaCheckoutException.Code.TIMEOUT, strings(s).errorMessage(PesaCheckoutException.Code.TIMEOUT))
+                }
+                delay(config.pollInterval)
+                s = try {
+                    session(intentId, clientSecret)
+                } catch (e: PesaCheckoutException) {
+                    if (e.code == PesaCheckoutException.Code.NETWORK) s else throw e
                 }
             }
-            val limit = if (challengeOpened) config.challengePolls else config.maxPolls
-            if (++polls > limit) {
-                throw PesaCheckoutException(PesaCheckoutException.Code.TIMEOUT, strings(s).errorMessage(PesaCheckoutException.Code.TIMEOUT))
-            }
-            delay(config.pollInterval)
-            s = try {
-                session(intentId, clientSecret)
-            } catch (e: PesaCheckoutException) {
-                if (e.code == PesaCheckoutException.Code.NETWORK) s else throw e
-            }
+        } finally {
+            if (challengeOpened) openChallenge.close()
         }
     }
 
