@@ -24,7 +24,19 @@ All notable changes to this project are documented here. The format follows
   `ChallengeOpener` is the open-only form.
 - `PesaCheckoutException.Code.CHALLENGE_CANCELLED` when the cardholder
   closes the page before it finished, with `PesaStrings.errorChallengeCancelled`.
-- `PesaStrings.challengeTitle`, the page's title.
+- The in-app 3-D Secure page has a close button and no title: the bank's
+  page has its own heading. It shows "Connecting to your bank…" until that
+  page has loaded, and closing (or Back) asks "Cancel this payment?"
+  first. `challengePresenter(surface, context, title)` takes a title of
+  your own. `PesaStrings` has `challengeLabel` (the screen reader's name
+  for the page), `challengeConnecting`, `challengeCancelQuestion`,
+  `challengeCancel` and `challengeKeepGoing`.
+- `PesaCardTheme` in `checkout-ui`, passed as `PesaCardForm(theme = …)`,
+  lays the saved-card list out with the same options as pesa-flutter:
+  `separateRows` and `rowSpacing` (a box per row, the card fields in their
+  own box under "Use another card"), `selectedRowBorder`, `brandChip`,
+  `anotherCardFirst`, `anotherCardSubtitle` and `anotherCardLeading`. The
+  defaults keep the list as it was.
 - Languages: `en`, `fr`, `fr-CA` and `zh-Hans`. `PesaStrings` in
   `commonMain` holds every string, one table per language
   (`PesaStrings.en`, `fr`, `frCA`, `zhHans`). `PesaStrings.resolve(locale,

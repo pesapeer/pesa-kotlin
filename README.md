@@ -76,8 +76,10 @@ when (result.state) {
 `challengePresenter(surface, activity)` picks where the challenge shows.
 `ChallengeSurface.IN_APP`, the default, is a full-screen web view inside
 the app (`PesaChallengeActivity` on Android, a `WKWebView` controller on
-iOS). The customer never leaves the app. A customer who closes the page
-gets `PesaCheckoutException` with `Code.CHALLENGE_CANCELLED`.
+iOS). The customer never leaves the app. The page has a close button and
+no title; pass `title = "…"` for one. Closing asks "Cancel this payment?"
+first; a customer who confirms gets `PesaCheckoutException` with
+`Code.CHALLENGE_CANCELLED`.
 `ChallengeSurface.BROWSER` is the system browser (Custom Tabs,
 `SFSafariViewController`); with it the intent's `returnUrl`, your app
 link, brings the user back. Any `ChallengePresenter` of your own works too.
@@ -123,6 +125,13 @@ hairlines between the rows.
   `outlineVariant`, `onSurfaceVariant`, `primary`, `error`), so a dark
   colour scheme gives a dark sheet. The brand chip stays white so the
   marks read on any surface.
+- `PesaCardForm(theme = PesaCardTheme(…))` lays the list out.
+  `separateRows` draws a box per row, `rowSpacing` apart, with the card
+  fields in their own box under "Use another card"; `selectedRowBorder`
+  outlines the selected row. `brandChip = false` shows the bare brand
+  mark. `anotherCardFirst` moves "Use another card" above the saved
+  cards, `anotherCardSubtitle` gives it a second line and
+  `anotherCardLeading` its mark.
 - Brand names from the gateway are read in any case, with or without
   spaces, `_` or `-`. `mc`, `americanexpress`, `cup` and `chinaunionpay`
   are understood (`CardBrand.parse`).

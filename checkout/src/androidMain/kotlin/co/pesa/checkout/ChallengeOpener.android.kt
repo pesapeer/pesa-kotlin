@@ -12,10 +12,10 @@ import java.lang.ref.WeakReference
  * on the app's task so the app's link brings the user back. [context] must
  * be the Activity.
  */
-actual fun challengePresenter(surface: ChallengeSurface, context: Any?): ChallengePresenter {
+actual fun challengePresenter(surface: ChallengeSurface, context: Any?, title: String?): ChallengePresenter {
     val activity = requireNotNull(context as? Activity) { "challengePresenter needs the Activity on Android" }
     return when (surface) {
-        ChallengeSurface.IN_APP -> WebViewChallengePresenter(activity)
+        ChallengeSurface.IN_APP -> WebViewChallengePresenter(activity, title)
         ChallengeSurface.BROWSER -> ChallengeOpener { url ->
             CustomTabsIntent.Builder()
                 .setShowTitle(false)
@@ -26,13 +26,17 @@ actual fun challengePresenter(surface: ChallengeSurface, context: Any?): Challen
     }
 }
 
-internal class WebViewChallengePresenter(activity: Activity) : ChallengePresenter {
+internal class WebViewChallengePresenter(activity: Activity, private val title: String? = null) : ChallengePresenter {
     private val host = WeakReference(activity)
 
     override suspend fun open(url: String, onCancelled: () -> Unit) {
         val activity = host.get() ?: return
         ChallengeSession.start(onCancelled)
-        activity.startActivity(Intent(activity, PesaChallengeActivity::class.java).putExtra(PesaChallengeActivity.EXTRA_URL, url))
+        activity.startActivity(
+            Intent(activity, PesaChallengeActivity::class.java)
+                .putExtra(PesaChallengeActivity.EXTRA_URL, url)
+                .putExtra(PesaChallengeActivity.EXTRA_TITLE, title),
+        )
     }
 
     override fun close() = ChallengeSession.close()

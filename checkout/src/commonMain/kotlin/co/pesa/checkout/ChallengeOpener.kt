@@ -48,5 +48,13 @@ enum class ChallengeSurface {
  * The platform's presenter for [surface]. [context] is the Android
  * Activity (required there); on iOS a `UIViewController` to present from,
  * or null for the top one; ignored on the JVM.
+ *
+ * The in-app page has a close button and no title, since the bank's page
+ * has its own heading; [title] gives it one. Closing asks before it
+ * cancels the payment.
  */
-expect fun challengePresenter(surface: ChallengeSurface = ChallengeSurface.IN_APP, context: Any? = null): ChallengePresenter
+expect fun challengePresenter(
+    surface: ChallengeSurface = ChallengeSurface.IN_APP,
+    context: Any? = null,
+    title: String? = null,
+): ChallengePresenter

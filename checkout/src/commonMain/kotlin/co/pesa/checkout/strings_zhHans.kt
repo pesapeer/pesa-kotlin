@@ -37,5 +37,9 @@ internal val stringsZhHans = PesaStrings(
     errorTimeout = "付款仍在处理中。再次付款前，请先向商家确认。",
     errorServer = "无法完成付款，请重试。",
     errorChallengeCancelled = "银行验证已取消，请重试以完成付款。",
-    challengeTitle = "验证您的卡",
+    challengeLabel = "银行验证",
+    challengeConnecting = "正在连接您的银行…",
+    challengeCancelQuestion = "取消此次付款？",
+    challengeCancel = "取消付款",
+    challengeKeepGoing = "继续",
 )

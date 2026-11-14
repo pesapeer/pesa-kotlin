@@ -7,10 +7,19 @@ import platform.Foundation.NSURL
 import platform.Foundation.NSSelectorFromString
 import platform.Foundation.NSURLRequest
 import platform.SafariServices.SFSafariViewController
+import platform.UIKit.NSTextAlignmentCenter
+import platform.UIKit.UIAccessibilityPostNotification
+import platform.UIKit.UIAccessibilityScreenChangedNotification
+import platform.UIKit.UIAlertAction
+import platform.UIKit.UIAlertActionStyleCancel
+import platform.UIKit.UIAlertActionStyleDestructive
+import platform.UIKit.UIAlertController
+import platform.UIKit.UIAlertControllerStyleAlert
 import platform.UIKit.UIApplication
 import platform.UIKit.UIBarButtonItem
 import platform.UIKit.UIBarButtonSystemItem
 import platform.UIKit.UIColor
+import platform.UIKit.UILabel
 import platform.UIKit.UIModalPresentationFullScreen
 import platform.UIKit.UINavigationController
 import platform.UIKit.UIViewAutoresizingFlexibleHeight
@@ -18,6 +27,7 @@ import platform.UIKit.UIViewAutoresizingFlexibleWidth
 import platform.UIKit.UIViewController
 import platform.UIKit.navigationItem
 import platform.WebKit.WKNavigationAction
+import platform.WebKit.WKNavigation
 import platform.WebKit.WKNavigationActionPolicy
 import platform.WebKit.WKNavigationDelegateProtocol
 import platform.WebKit.WKWebView
@@ -30,8 +40,8 @@ import platform.darwin.NSObject
  * returnUrl) returns from. Both present over [context] when it is a
  * `UIViewController`, else over the key window's top one.
  */
-actual fun challengePresenter(surface: ChallengeSurface, context: Any?): ChallengePresenter = when (surface) {
-    ChallengeSurface.IN_APP -> WebViewChallengePresenter(context as? UIViewController)
+actual fun challengePresenter(surface: ChallengeSurface, context: Any?, title: String?): ChallengePresenter = when (surface) {
+    ChallengeSurface.IN_APP -> WebViewChallengePresenter(context as? UIViewController, title)
     ChallengeSurface.BROWSER -> ChallengeOpener { url ->
         val nsUrl = NSURL.URLWithString(url) ?: return@ChallengeOpener
         val presenter = (context as? UIViewController) ?: topViewController() ?: return@ChallengeOpener
@@ -47,7 +57,10 @@ private fun topViewController(): UIViewController? {
 }
 
 @OptIn(ExperimentalForeignApi::class)
-internal class WebViewChallengePresenter(private val host: UIViewController?) : ChallengePresenter {
+internal class WebViewChallengePresenter(
+    private val host: UIViewController?,
+    private val title: String? = null,
+) : ChallengePresenter {
     private var page: ChallengeViewController? = null
 
     override suspend fun open(url: String, onCancelled: () -> Unit) {
@@ -55,7 +68,7 @@ internal class WebViewChallengePresenter(private val host: UIViewController?) : 
         if (nsUrl.scheme != "https") return
         val presenter = host ?: topViewController() ?: return
         close()
-        val controller = ChallengeViewController(nsUrl, onCancelled)
+        val controller = ChallengeViewController(nsUrl, title, onCancelled)
         page = controller
         val nav = UINavigationController(rootViewController = controller)
         nav.modalPresentationStyle = UIModalPresentationFullScreen
@@ -71,22 +84,28 @@ internal class WebViewChallengePresenter(private val host: UIViewController?) : 
 
 /**
  * The page that hosts the challenge. Only `http(s)` loads; the checkout's
- * return page, or the bounce to the app's own scheme, ends it. The close
- * button is a cancel.
+ * return page, or the bounce to the app's own scheme, ends it.
+ *
+ * The bar holds a close button and, only when the host gave one, a title:
+ * the bank's page has its own heading. Until that page has loaded the page
+ * says it is connecting. The close button asks before it cancels.
  */
 @OptIn(ExperimentalForeignApi::class)
 internal class ChallengeViewController(
     private val url: NSURL,
+    private val barTitle: String?,
     private val onCancelled: () -> Unit,
 ) : UIViewController(nibName = null, bundle = null) {
     private val returnPath = url.path.orEmpty().replace(Regex("/challenge/?$"), "/return")
+    private val strings = PesaStrings.resolve()
     private var done = false
     private val delegate = NavigationDelegate()
     private var web: WKWebView? = null
+    private var connecting: UILabel? = null
 
     override fun viewDidLoad() {
         super.viewDidLoad()
-        title = PesaStrings.resolve().challengeTitle
+        title = barTitle
         view.backgroundColor = UIColor.whiteColor
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             barButtonSystemItem = UIBarButtonSystemItem.UIBarButtonSystemItemClose,
@@ -98,21 +117,55 @@ internal class ChallengeViewController(
         web.autoresizingMask = UIViewAutoresizingFlexibleWidth or UIViewAutoresizingFlexibleHeight
         view.addSubview(web)
         this.web = web
+        val connecting = UILabel(frame = view.bounds)
+        connecting.text = strings.challengeConnecting
+        connecting.textAlignment = NSTextAlignmentCenter
+        connecting.textColor = UIColor.blackColor
+        connecting.backgroundColor = UIColor.whiteColor
+        connecting.autoresizingMask = UIViewAutoresizingFlexibleWidth or UIViewAutoresizingFlexibleHeight
+        view.addSubview(connecting)
+        this.connecting = connecting
         web.loadRequest(NSURLRequest(uRL = url))
     }
 
+    override fun viewDidAppear(animated: Boolean) {
+        super.viewDidAppear(animated)
+        // The page has no title to read out, so it is named here.
+        if (barTitle == null) UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, strings.challengeLabel)
+    }
+
+    /** Leaving cancels the payment, so the cardholder is asked first. */
     @ObjCAction
     fun closeTapped() {
         if (done) return
-        done = true
-        dismissViewControllerAnimated(true) { onCancelled() }
+        val question = UIAlertController.alertControllerWithTitle(
+            title = strings.challengeCancelQuestion,
+            message = null,
+            preferredStyle = UIAlertControllerStyleAlert,
+        )
+        question.addAction(UIAlertAction.actionWithTitle(strings.challengeKeepGoing, style = UIAlertActionStyleCancel, handler = null))
+        question.addAction(
+            UIAlertAction.actionWithTitle(strings.challengeCancel, style = UIAlertActionStyleDestructive) { _ ->
+                if (!done) {
+                    done = true
+                    leave { onCancelled() }
+                }
+            },
+        )
+        presentViewController(question, animated = true, completion = null)
     }
 
     /** The checkout settled the attempt: nothing to tell the caller. */
     fun endedByCheckout() {
         if (done) return
         done = true
-        dismissViewControllerAnimated(true, completion = null)
+        leave(null)
+    }
+
+    /** Dismisses from the presenter, so a question still on screen goes with the page. */
+    private fun leave(completion: (() -> Unit)?) {
+        val presenter = navigationController?.presentingViewController ?: presentingViewController
+        presenter?.dismissViewControllerAnimated(true, completion = completion)
     }
 
     private fun isReturn(target: NSURL): Boolean =
@@ -150,6 +203,12 @@ internal class ChallengeViewController(
             }
             decisionHandler(WKNavigationActionPolicy.WKNavigationActionPolicyCancel)
             endedByCheckout()
+        }
+
+        @ObjCSignatureOverride
+        override fun webView(webView: WKWebView, didFinishNavigation: WKNavigation?) {
+            connecting?.removeFromSuperview()
+            connecting = null
         }
     }
 }

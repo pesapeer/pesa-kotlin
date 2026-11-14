@@ -31,6 +31,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import co.pesa.checkout.CardBrand
@@ -174,6 +176,33 @@ class PesaCardFormState(
 }
 
 /**
+ * How the saved-card list is laid out. Colours and type come from the
+ * app's Material theme; the defaults keep the list as it was.
+ *
+ * The same options as `PesaCardTheme` in pesa-flutter and pesa-ios.
+ */
+@Immutable
+class PesaCardTheme(
+    /**
+     * The list as a box per row, [rowSpacing] apart, with the card fields in
+     * a box of their own under "Use another card". One box with hairlines
+     * between the rows when false.
+     */
+    val separateRows: Boolean = false,
+    val rowSpacing: Dp = 8.dp,
+    /** The outline of the selected row while [separateRows] is on; the usual outline when null. */
+    val selectedRowBorder: BorderStroke? = null,
+    /** A saved card's brand on a white chip. The bare mark when false. */
+    val brandChip: Boolean = true,
+    /** "Use another card" above the saved cards rather than under them. */
+    val anotherCardFirst: Boolean = false,
+    /** A second line under "Use another card"; none when null. */
+    val anotherCardSubtitle: String? = null,
+    /** The mark at the start of "Use another card"; a plus when null. */
+    val anotherCardLeading: (@Composable () -> Unit)? = null,
+)
+
+/**
  * The strings for every Pesa composable below it. Null (the default) lets
  * each form use its state's [PesaCardFormState.strings].
  */
@@ -195,7 +224,7 @@ val LocalPesaStrings = staticCompositionLocalOf<PesaStrings?> { null }
  * [PesaSaveCardSwitch] yourself.
  *
  * The language is [locale] when set, else [LocalPesaStrings], else the
- * state's [PesaCardFormState.strings].
+ * state's [PesaCardFormState.strings]. [theme] lays the saved-card list out.
  */
 @Composable
 fun PesaCardForm(
@@ -206,12 +235,13 @@ fun PesaCardForm(
     enabled: Boolean = true,
     showSaveCardSwitch: Boolean = true,
     locale: String? = null,
+    theme: PesaCardTheme = PesaCardTheme(),
 ) {
     val strings = locale?.let { remember(it, state) { PesaStrings.resolve(it, state.sessionLocale) } }
         ?: LocalPesaStrings.current
         ?: state.strings
     CompositionLocalProvider(LocalPesaStrings provides strings) {
-        CardFormBody(state, strings, nowYear, nowMonth, modifier, enabled, showSaveCardSwitch)
+        CardFormBody(state, strings, nowYear, nowMonth, modifier, enabled, showSaveCardSwitch, theme)
     }
 }
 
@@ -224,6 +254,7 @@ private fun CardFormBody(
     modifier: Modifier,
     enabled: Boolean,
     showSaveCardSwitch: Boolean,
+    theme: PesaCardTheme,
 ) {
     LaunchedEffect(state, nowYear, nowMonth) { state.dropExpiredSelection(nowYear, nowMonth) }
     val errors = state.errors(nowYear, nowMonth, strings).filter { it.field in state.touched }.associateBy { it.field }
@@ -238,44 +269,91 @@ private fun CardFormBody(
     }
 
     val selected = state.selectedSavedCard
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        modifier = modifier.fillMaxWidth(),
-    ) {
-        Column(Modifier.animateContentSize()) {
-            state.savedCards.forEach { card ->
-                SavedCardRow(
-                    state = state,
-                    strings = strings,
-                    card = card,
-                    usable = card.isUsable(nowYear, nowMonth),
-                    selected = card.token == selected?.token,
-                    error = errors[CardField.SECURITY_CODE]?.message,
-                    enabled = enabled,
-                    touch = touch,
-                )
-                Hairline()
-            }
-            PickerRow(
-                selected = selected == null,
-                enabled = enabled,
-                onClick = { state.select(null) },
-                leading = { PlusMark(MaterialTheme.colorScheme.onSurface) },
-                title = strings.useAnotherCard,
-            )
-            val footer = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp)
-            if (selected == null) {
-                Column(footer, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val another: @Composable () -> Unit = {
+        PickerRow(
+            selected = selected == null,
+            enabled = enabled,
+            onClick = { state.select(null) },
+            leading = theme.anotherCardLeading ?: { PlusMark(MaterialTheme.colorScheme.onSurface) },
+            title = strings.useAnotherCard,
+            subtitle = theme.anotherCardSubtitle,
+        )
+    }
+    val saved: @Composable (SavedCard) -> Unit = { card ->
+        SavedCardRow(
+            state = state,
+            strings = strings,
+            card = card,
+            usable = card.isUsable(nowYear, nowMonth),
+            selected = card.token == selected?.token,
+            error = errors[CardField.SECURITY_CODE]?.message,
+            enabled = enabled,
+            brandChip = theme.brandChip,
+            touch = touch,
+        )
+    }
+    val inset = Modifier.padding(start = 16.dp, end = 16.dp, top = if (theme.separateRows) 16.dp else 4.dp, bottom = 16.dp)
+    val footer: (@Composable () -> Unit)? = when {
+        selected == null -> {
+            {
+                Column(inset, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     TypedCardFields(state, strings, errors, enabled, touch)
                     if (showSaveCardSwitch) PesaSaveCardSwitch(state, enabled = enabled)
                 }
-            } else if (state.needsEmail) {
-                Box(footer) { EmailField(state, strings, errors, enabled, touch) }
             }
         }
+        state.needsEmail -> {
+            { Box(inset) { EmailField(state, strings, errors, enabled, touch) } }
+        }
+        else -> null
     }
+
+    if (!theme.separateRows) {
+        ListBox(modifier) {
+            Column(Modifier.animateContentSize()) {
+                if (theme.anotherCardFirst) {
+                    another()
+                    Hairline()
+                }
+                state.savedCards.forEachIndexed { index, card ->
+                    if (index > 0) Hairline()
+                    saved(card)
+                }
+                if (!theme.anotherCardFirst) {
+                    Hairline()
+                    another()
+                }
+                footer?.invoke()
+            }
+        }
+        return
+    }
+
+    // The card fields sit right under "Use another card".
+    val anotherAndFields: @Composable () -> Unit = {
+        ListBox(outline = theme.selectedRowBorder.takeIf { selected == null }) { another() }
+        if (selected == null && footer != null) ListBox { footer() }
+    }
+    Column(modifier.fillMaxWidth().animateContentSize(), verticalArrangement = Arrangement.spacedBy(theme.rowSpacing)) {
+        if (theme.anotherCardFirst) anotherAndFields()
+        state.savedCards.forEach { card ->
+            ListBox(outline = theme.selectedRowBorder.takeIf { card.token == selected?.token }) { saved(card) }
+        }
+        if (!theme.anotherCardFirst) anotherAndFields()
+        if (selected != null && footer != null) ListBox { footer() }
+    }
+}
+
+/** The list's surface: one box, outlined with [outline] or the theme's hairline colour. */
+@Composable
+private fun ListBox(modifier: Modifier = Modifier, outline: BorderStroke? = null, content: @Composable () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        border = outline ?: BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = modifier.fillMaxWidth(),
+        content = content,
+    )
 }
 
 /** "Save this card for next time", shown only while a typed card may be kept. */
@@ -373,6 +451,7 @@ private fun SavedCardRow(
     selected: Boolean,
     error: String?,
     enabled: Boolean,
+    brandChip: Boolean,
     touch: (CardField) -> Unit,
 ) {
     val asksCode = selected && state.asksSavedSecurityCode
@@ -381,7 +460,7 @@ private fun SavedCardRow(
             selected = selected,
             enabled = enabled && usable,
             onClick = { state.select(card) },
-            leading = { BrandChip(card.cardBrand) },
+            leading = { BrandChip(card.cardBrand, chip = brandChip) },
             title = "•••• ${card.last4}",
             subtitle = if (usable) strings.expiresOn(card.shortExpiry) else strings.expired,
             trailing = {
@@ -494,11 +573,22 @@ private fun Hairline() {
     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 1.dp, color = MaterialTheme.colorScheme.outlineVariant)
 }
 
-/** The brand on a white chip, so it reads the same on a dark surface. */
+/** The brand on a white chip, so it reads the same on a dark surface; the bare mark when [chip] is false. */
 @Composable
-private fun BrandChip(brand: CardBrand) {
+private fun BrandChip(brand: CardBrand, chip: Boolean = true) {
     if (brand == CardBrand.UNKNOWN) {
         CardOutline(MaterialTheme.colorScheme.onSurfaceVariant)
+        return
+    }
+    if (!chip) {
+        Text(
+            brandMark(brand),
+            color = brandInk(brand),
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+            modifier = Modifier.clearAndSetSemantics { contentDescription = brandName(brand) },
+        )
         return
     }
     val shape = RoundedCornerShape(5.dp)

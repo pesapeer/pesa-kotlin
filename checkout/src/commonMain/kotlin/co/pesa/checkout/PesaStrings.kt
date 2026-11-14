@@ -51,8 +51,14 @@ data class PesaStrings(
     val errorTimeout: String,
     val errorChallengeCancelled: String,
     val errorServer: String,
-    /** The title of the in-app 3-D Secure page. */
-    val challengeTitle: String,
+    /** What a screen reader calls the in-app 3-D Secure page, which has no title of its own. */
+    val challengeLabel: String,
+    /** Shown on the 3-D Secure page until the bank's page has loaded. */
+    val challengeConnecting: String,
+    /** Asked when the cardholder closes the 3-D Secure page. */
+    val challengeCancelQuestion: String,
+    val challengeCancel: String,
+    val challengeKeepGoing: String,
 ) {
     /** [amount] (a decimal string such as `2.00`) in [currency], formatted by the platform for [tag]. */
     fun formatAmount(amount: String, currency: String): String =
@@ -102,7 +108,9 @@ data class PesaStrings(
         "errorIntentClosed" to errorIntentClosed, "errorAttemptInProgress" to errorAttemptInProgress,
         "errorRateLimited" to errorRateLimited, "errorNetwork" to errorNetwork,
         "errorTimeout" to errorTimeout, "errorChallengeCancelled" to errorChallengeCancelled,
-        "errorServer" to errorServer, "challengeTitle" to challengeTitle,
+        "errorServer" to errorServer, "challengeLabel" to challengeLabel,
+        "challengeConnecting" to challengeConnecting, "challengeCancelQuestion" to challengeCancelQuestion,
+        "challengeCancel" to challengeCancel, "challengeKeepGoing" to challengeKeepGoing,
     )
 
     companion object {
